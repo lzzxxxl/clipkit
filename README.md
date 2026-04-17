@@ -6,6 +6,8 @@
 
 - **智能标题提取**：自动从剪贴板内容中识别文章/文件标题
 - **自动匹配保存**：根据标题匹配本地 TXT 文件，自动保存内容
+- **Markdown转HTML**：自动将复制的Markdown内容转换为HTML格式
+- **匹配字段自定义**：支持用户自定义标题匹配字段，默认保持原样
 - **多主题支持**：支持黑色极简、白色极简、粉色三种主题
 - **窗口置顶**：可选择将窗口始终保持在最前面
 - **轻量高效**：占用资源少，后台静默运行
@@ -27,7 +29,7 @@
 
 ```bash
 # 安装依赖
-pip install pyperclip
+pip install pyperclip markdown
 
 # 运行程序
 python clipboard_watcher.py
@@ -69,7 +71,9 @@ pyinstaller 剪贴板自动保存.spec
   "last_folder": "上次使用的文件夹路径",
   "auto_save": true,
   "always_on_top": true,
-  "theme": "pink"
+  "theme": "pink",
+  "markdown_convert": false,
+  "match_patterns": ""
 }
 ```
 
@@ -79,6 +83,8 @@ pyinstaller 剪贴板自动保存.spec
 | `auto_save` | boolean | 是否自动保存到匹配文件 |
 | `always_on_top` | boolean | 窗口是否置顶 |
 | `theme` | string | 主题：`black`、`white` 或 `pink` |
+| `markdown_convert` | boolean | 是否启用Markdown转HTML功能 |
+| `match_patterns` | string | 自定义匹配字段，多个字段用逗号分隔 |
 
 ## 项目结构
 
@@ -99,6 +105,7 @@ pyinstaller 剪贴板自动保存.spec
 
 - **GUI**：tkinter（Python 内置）
 - **剪贴板**：pyperclip
+- **Markdown转换**：markdown
 - **打包**：PyInstaller
 
 ## License
