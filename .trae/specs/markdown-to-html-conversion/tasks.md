@@ -53,16 +53,33 @@
   - `programmatic` TR-4.2: 非Markdown内容的保存行为不变
 - **Notes**: 应在on_clipboard_change方法中集成转换逻辑
 
-## [ ] Task 5: 测试和验证
-- **Priority**: P1
+## [ ] Task 5: 实现匹配字段自定义功能
+- **Priority**: P0
 - **Depends On**: Task 4
+- **Description**:
+  - 在GUI界面中添加匹配字段自定义选项
+  - 在配置文件中添加对应的配置项
+  - 实现匹配字段的保存和加载
+  - 修改文件匹配逻辑，支持自定义匹配字段
+- **Acceptance Criteria Addressed**: AC-5
+- **Test Requirements**:
+  - `human-judgment` TR-5.1: 匹配字段设置界面清晰可见
+  - `programmatic` TR-5.2: 自定义匹配字段能够正确保存和加载
+  - `programmatic` TR-5.3: 程序能够根据自定义匹配字段进行文件匹配
+- **Notes**: 默认应保持原有匹配逻辑，用户可以自定义匹配规则
+
+## [ ] Task 6: 测试和验证
+- **Priority**: P1
+- **Depends On**: Task 5
 - **Description**:
   - 测试Markdown转HTML功能的正确性
   - 验证向后兼容性
   - 检查界面功能和用户体验
-- **Acceptance Criteria Addressed**: AC-1, AC-2, AC-3, AC-4
+  - 测试匹配字段自定义功能
+- **Acceptance Criteria Addressed**: AC-1, AC-2, AC-3, AC-4, AC-5
 - **Test Requirements**:
-  - `programmatic` TR-5.1: 测试各种Markdown语法的转换
-  - `human-judgment` TR-5.2: 验证界面操作流畅性
-  - `programmatic` TR-5.3: 测试非Markdown内容的处理
+  - `programmatic` TR-6.1: 测试各种Markdown语法的转换
+  - `human-judgment` TR-6.2: 验证界面操作流畅性
+  - `programmatic` TR-6.3: 测试非Markdown内容的处理
+  - `programmatic` TR-6.4: 测试自定义匹配字段的功能
 - **Notes**: 应测试常见的Markdown语法，如标题、列表、链接、粗体、斜体等
