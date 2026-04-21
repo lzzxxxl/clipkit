@@ -1,6 +1,7 @@
 {
-  "last_folder": "",
+  "last_folder": "C:/Users/Administrator/Desktop/clipkit/dist/新建文件夹",
   "auto_save": true,
   "always_on_top": true,
-  "theme": "black"
+  "theme": "black",
+  "match_patterns": "**原文章标题**,**原文件标题**,**文章标题**,**文件标题**"
 }
