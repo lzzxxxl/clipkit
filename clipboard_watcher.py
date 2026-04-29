@@ -8,6 +8,7 @@ import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import pyperclip
+import markdown
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径（支持开发环境和 PyInstaller 打包后）"""
@@ -94,20 +95,47 @@ THEMES = {
 }
 
 class ClipboardWatcher:
-    def __init__(self, folder_path, callback, interval=0.3):
+    def __init__(self, folder_path, callback, interval=0.3, match_patterns=""):
         self.folder_path = folder_path
         self.callback = callback
         self.interval = interval
         self.running = False
         self.last_content = ""
+        self.match_patterns = match_patterns
         
     def extract_title_from_content(self, content):
         patterns = [
+            r'\*\*原文章标题：\*\*\s*([^\n]+?)(?:\s*-->|$)',
+            r'\*\*原文件标题：\*\*\s*([^\n]+?)(?:\s*-->|$)',
+            r'\*\*文章标题：\*\*\s*([^\n]+?)(?:\s*-->|$)',
+            r'\*\*文件标题：\*\*\s*([^\n]+?)(?:\s*-->|$)',
             r'原文章标题[：:]\s*([^\n]+?)(?:\s*-->\s*$|\.txt\s*-->\s*$)',
             r'原文件标题[：:]\s*([^\n]+?)(?:\s*-->\s*$|\.txt\s*-->\s*$)',
+            r'文章标题[：:]\s*([^\n]+?)(?:\s*-->\s*$|\.txt\s*-->\s*$)',
+            r'文件标题[：:]\s*([^\n]+?)(?:\s*-->\s*$|\.txt\s*-->\s*$)',
             r'title[：:]\s*([^\n<]+)',
             r'<title>(.+?)</title>',
         ]
+        
+        # 添加用户自定义的匹配字段（自动支持三种格式）
+        if self.match_patterns:
+            custom_patterns = self.match_patterns.split(',')
+            for pattern in custom_patterns:
+                pattern = pattern.strip()
+                if pattern:
+                    # 提取字段名（去掉末尾的冒号）
+                    if pattern.endswith('：') or pattern.endswith(':'):
+                        field_name = pattern[:-1]
+                    else:
+                        field_name = pattern
+
+                    escaped = re.escape(field_name)
+                    # 格式1: **字段名：**
+                    patterns.append(fr'\*\*{escaped}：\*\*\s*([^\n]+?)(?:\s*-->|$)')
+                    # 格式2: 字段名： 或 字段名: (不需要-->结尾)
+                    patterns.append(fr'{escaped}[：:]\s*(.+?)(?:\s*-->|\s*$)')
+                    # 格式3: <strong>字段名：</strong>
+                    patterns.append(fr'<strong>{escaped}：</strong>\s*([^\n<]+)')
         
         for pattern in patterns:
             match = re.search(pattern, content, re.MULTILINE | re.IGNORECASE)
@@ -135,6 +163,26 @@ class ClipboardWatcher:
     def normalize(self, text):
         """标准化文本：转小写"""
         return str(text).lower()
+    
+    def is_markdown_content(self, content):
+        """检测内容是否为Markdown格式"""
+        # 检查常见的Markdown语法特征
+        markdown_patterns = [
+            r'^#{1,6}\s',  # 标题
+            r'^-\s',  # 无序列表
+            r'^\d+\.\s',  # 有序列表
+            r'\[.+\]\(.+\)',  # 链接
+            r'\*\*.+\*\*',  # 粗体
+            r'\*.+\*',  # 斜体
+            r'```[\s\S]*?```',  # 代码块
+            r'>\s',  # 引用
+        ]
+        
+        for pattern in markdown_patterns:
+            if re.search(pattern, content, re.MULTILINE):
+                return True
+        
+        return False
     
     def match_file(self, title):
         if not title:
@@ -207,7 +255,7 @@ class ModernApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("剪贴板自动保存")
-        self.root.geometry("600x520")
+        self.root.geometry("600x580")
         self.root.resizable(False, False)
         
         # 设置窗口图标
@@ -219,6 +267,8 @@ class ModernApp:
         self.auto_save = tk.BooleanVar(value=True)
         self.always_on_top = tk.BooleanVar(value=True)
         self.theme_var = tk.StringVar(value="pink")
+        self.markdown_convert = tk.BooleanVar(value=False)
+        self.match_patterns = tk.StringVar(value="")
         self.is_running = False
         
         self.current_theme = "pink"
@@ -366,6 +416,51 @@ class ModernApp:
             activebackground=THEMES[self.current_theme]["bg"],
             cursor="hand2"
         ).pack(side=tk.LEFT, padx=24)
+        
+        tk.Checkbutton(
+            options_frame,
+            text="Markdown转HTML",
+            variable=self.markdown_convert,
+            font=("Microsoft YaHei", 10),
+            bg=THEMES[self.current_theme]["bg"],
+            fg=THEMES[self.current_theme]["text"],
+            selectcolor=THEMES[self.current_theme]["surface"],
+            activebackground=THEMES[self.current_theme]["bg"],
+            cursor="hand2"
+        ).pack(side=tk.LEFT, padx=24)
+        
+        # 匹配字段自定义
+        match_frame = tk.Frame(main_frame, bg=THEMES[self.current_theme]["bg"])
+        match_frame.pack(fill=tk.X, pady=(0, 16))
+        
+        tk.Label(
+            match_frame,
+            text="匹配字段:",
+            font=("Microsoft YaHei", 10),
+            bg=THEMES[self.current_theme]["bg"],
+            fg=THEMES[self.current_theme]["text"]
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        
+        tk.Entry(
+            match_frame,
+            textvariable=self.match_patterns,
+            font=("Microsoft YaHei", 10),
+            bg=THEMES[self.current_theme]["surface"],
+            fg=THEMES[self.current_theme]["text"],
+            insertbackground=THEMES[self.current_theme]["text"],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightcolor=THEMES[self.current_theme]["accent"],
+            highlightbackground=THEMES[self.current_theme]["border"]
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        tk.Label(
+            match_frame,
+            text="(默认保持原样，多个字段用逗号分隔)",
+            font=("Microsoft YaHei", 9),
+            bg=THEMES[self.current_theme]["bg"],
+            fg=THEMES[self.current_theme]["text_muted"]
+        ).pack(side=tk.LEFT, padx=(8, 0))
         
         # 控制按钮
         btn_frame = tk.Frame(main_frame, bg=THEMES[self.current_theme]["bg"])
@@ -557,6 +652,10 @@ class ModernApp:
         self.always_on_top.set(config.get("always_on_top", True))
         self.root.attributes('-topmost', self.always_on_top.get())
         
+        self.markdown_convert.set(config.get("markdown_convert", False))
+        
+        self.match_patterns.set(config.get("match_patterns", ""))
+        
         theme = config.get("theme", "pink")
         self.theme_var.set(theme)
         self.current_theme = theme
@@ -586,20 +685,149 @@ class ModernApp:
             self.root.update()
             time.sleep(0.15)
     
+    def process_wp_content(self, content):
+        """处理WordPress格式内容：提取元数据并分离正文内容
+        
+        支持多种格式：
+        1. 使用 --- 或 *** 作为分隔线分割元数据和正文
+        2. 元数据可以在正文前或正文后
+        3. 支持 Markdown 格式 **字段名：** 值
+        4. 支持 HTML 格式 <strong>字段名：</strong> 值
+        5. 支持普通文本格式 字段名：值
+        """
+        # 首先尝试用分隔线分割（--- 或 ***）
+        delimiter_pattern = r'(?:\n|\r\n)?\s*(?:---|\*\*\*)\s*(?:\n|\r\n)?'
+        parts = re.split(delimiter_pattern, content)
+        
+        article_content = ""
+        metadata_section = ""
+        
+        if len(parts) >= 2:
+            # 有分隔线的情况
+            # 分析哪部分是元数据（包含 **字段名：** 或 <strong>字段名：</strong> 模式）
+            for i, part in enumerate(parts):
+                if self._is_metadata_section(part):
+                    metadata_section = part.strip()
+                elif not article_content:
+                    # 第一个非元数据部分作为正文
+                    article_content = part.strip()
+        else:
+            # 没有分隔线，尝试从内容开头或结尾提取元数据
+            lines = content.split('\n')
+            metadata_lines = []
+            article_lines = []
+            in_metadata = True
+            
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    in_metadata = False
+                    continue
+                    
+                # 检查是否是元数据行
+                if in_metadata and self._is_metadata_line(stripped):
+                    metadata_lines.append(stripped)
+                else:
+                    in_metadata = False
+                    article_lines.append(line)
+            
+            metadata_section = '\n'.join(metadata_lines)
+            article_content = '\n'.join(article_lines).strip()
+        
+        # 如果没有找到正文，使用原内容
+        if not article_content:
+            article_content = content
+        
+        # 提取元数据字段
+        metadata = self._extract_metadata(metadata_section)
+        
+        # 构建最终内容：正文 + 元数据注释
+        result = article_content
+        if metadata:
+            result += "\n\n"
+            for key, value in metadata.items():
+                result += f"<!-- {key}：{value} -->\n"
+        
+        return result.strip()
+    
+    def _is_metadata_section(self, text):
+        """判断文本段是否主要是元数据"""
+        lines = text.strip().split('\n')
+        if not lines:
+            return False
+        
+        # 统计元数据行数
+        metadata_lines = sum(1 for line in lines if self._is_metadata_line(line.strip()))
+        # 如果超过一半的行是元数据格式，认为是元数据段
+        return metadata_lines >= max(1, len(lines) // 2)
+    
+    def _is_metadata_line(self, line):
+        """判断单行是否是元数据格式"""
+        patterns = [
+            r'\*\*[^*]+[：:]\*\*\s*',  # **字段名：** 值
+            r'<strong>[^<]+[：:]</strong>\s*',  # <strong>字段名：</strong> 值
+            r'^[^：:\n]+[：:]\s*[^\n]+$',  # 字段名：值（普通文本）
+        ]
+        for pattern in patterns:
+            if re.search(pattern, line):
+                return True
+        return False
+    
+    def _extract_metadata(self, text):
+        """从文本中提取元数据"""
+        metadata = {}
+        if not text:
+            return metadata
+        
+        # 多种元数据提取模式
+        patterns = [
+            # Markdown 粗体格式: **字段名：** 值 或 **字段名:** 值
+            (r'\*\*([^*\n]+?)[：:]\*\*\s*([^\n]+)', 'md_bold'),
+            # HTML strong 格式: <strong>字段名：</strong> 值
+            (r'<strong>([^<]+?)[：:]</strong>\s*([^\n<]+)', 'html_strong'),
+            # 普通文本格式: 字段名：值（行首）
+            (r'^[\s]*([^：:\n\*<]+)[：:]\s*([^\n]+)$', 'plain'),
+        ]
+        
+        for pattern, fmt in patterns:
+            for m in re.finditer(pattern, text, re.MULTILINE):
+                key = m.group(1).strip()
+                value = m.group(2).strip()
+                # 清理值中的 Markdown/HTML 标记
+                value = re.sub(r'\*\*', '', value)  # 移除 **
+                value = re.sub(r'<[^>]+>', '', value)  # 移除 HTML 标签
+                if key and value and key not in metadata:
+                    metadata[key] = value
+        
+        return metadata
+
     def on_clipboard_change(self, file_path, filename, title, content, matched, matched_file=None, similarity=0):
         t = THEMES[self.current_theme]
-        
+
         if not title:
             self.log("未提取到标题")
             self.status_label.config(text="未提取到标题", fg=t["error"])
             return
-        
+
         if matched and file_path:
             if self.auto_save.get():
                 try:
+                    # 先处理WordPress格式内容（提取***之间的内容和元数据）
+                    processed_content = self.process_wp_content(content)
+
+                    # 检查是否需要进行Markdown转换
+                    if self.markdown_convert.get():
+                        if self.watcher.is_markdown_content(processed_content):
+                            try:
+                                converted_content = markdown.markdown(processed_content)
+                                processed_content = converted_content
+                                self.log("已将Markdown转换为HTML")
+                            except Exception as e:
+                                self.log(f"Markdown转换失败: {e}")
+
                     with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                    
+                        f.write(processed_content)
+
                     self.log(f"已保存: {filename}")
                     self.status_label.config(text=f"已保存: {filename}", fg=t["success"])
                 except Exception as e:
@@ -622,7 +850,7 @@ class ModernApp:
             messagebox.showerror("错误", "文件夹不存在！")
             return
         
-        self.watcher = ClipboardWatcher(self.folder_path, self.on_clipboard_change)
+        self.watcher = ClipboardWatcher(self.folder_path, self.on_clipboard_change, match_patterns=self.match_patterns.get())
         
         self.watcher_thread = threading.Thread(target=self.watcher.run, daemon=True)
         self.watcher_thread.start()
@@ -637,6 +865,8 @@ class ModernApp:
         config = load_config()
         config["auto_save"] = self.auto_save.get()
         config["always_on_top"] = self.always_on_top.get()
+        config["markdown_convert"] = self.markdown_convert.get()
+        config["match_patterns"] = self.match_patterns.get()
         save_config(config)
     
     def stop_watching(self):
