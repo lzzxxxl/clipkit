@@ -696,7 +696,8 @@ class ModernApp:
         5. 支持普通文本格式 字段名：值
         """
         # 首先尝试用分隔线分割（--- 或 ***）
-        delimiter_pattern = r'(?:\n|\r\n)?\s*(?:---|\*\*\*)\s*(?:\n|\r\n)?'
+        # 注意：排除表格分隔符 |---|---| 的情况
+        delimiter_pattern = r'(?:\n|\r\n)(?<!\|)\s*(?:---|\*\*\*)\s*(?:\n|\r\n)(?!\|)'
         parts = re.split(delimiter_pattern, content)
         
         article_content = ""
@@ -704,13 +705,17 @@ class ModernApp:
         
         if len(parts) >= 2:
             # 有分隔线的情况
-            # 分析哪部分是元数据（包含 **字段名：** 或 <strong>字段名：</strong> 模式）
+            # 找出元数据段（通常是第一个部分，且包含元数据格式）
+            # 其余部分合并为正文
             for i, part in enumerate(parts):
                 if self._is_metadata_section(part):
                     metadata_section = part.strip()
-                elif not article_content:
-                    # 第一个非元数据部分作为正文
-                    article_content = part.strip()
+                else:
+                    # 合并所有非元数据部分作为正文
+                    if article_content:
+                        article_content += "\n\n---\n\n" + part.strip()
+                    else:
+                        article_content = part.strip()
         else:
             # 没有分隔线，尝试从内容开头或结尾提取元数据
             lines = content.split('\n')
@@ -741,35 +746,46 @@ class ModernApp:
         # 提取元数据字段
         metadata = self._extract_metadata(metadata_section)
         
-        # 构建最终内容：正文 + 元数据注释
-        result = article_content
+        # 构建最终内容：元数据注释 + 正文
+        result = ""
         if metadata:
-            result += "\n\n"
             for key, value in metadata.items():
                 result += f"<!-- {key}：{value} -->\n"
+            result += "\n"
+        result += article_content
         
         return result.strip()
     
     def _is_metadata_section(self, text):
         """判断文本段是否主要是元数据"""
-        lines = text.strip().split('\n')
+        lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
         if not lines:
             return False
         
+        # 排除空行后统计
+        non_empty_lines = len(lines)
+        if non_empty_lines == 0:
+            return False
+        
         # 统计元数据行数
-        metadata_lines = sum(1 for line in lines if self._is_metadata_line(line.strip()))
-        # 如果超过一半的行是元数据格式，认为是元数据段
-        return metadata_lines >= max(1, len(lines) // 2)
+        metadata_lines = sum(1 for line in lines if self._is_metadata_line(line))
+        
+        # 如果元数据行数超过一半，且至少有2个元数据行，认为是元数据段
+        return metadata_lines >= 2 and metadata_lines >= (non_empty_lines // 2)
     
     def _is_metadata_line(self, line):
         """判断单行是否是元数据格式"""
+        # 排除表格行（以 | 开头或包含表格分隔符 |---|）
+        if line.startswith('|') or '|---' in line or '|---|' in line:
+            return False
+        
         patterns = [
-            r'\*\*[^*]+[：:]\*\*\s*',  # **字段名：** 值
-            r'<strong>[^<]+[：:]</strong>\s*',  # <strong>字段名：</strong> 值
-            r'^[^：:\n]+[：:]\s*[^\n]+$',  # 字段名：值（普通文本）
+            r'^\*\*[^*]+[：:]\*\*\s+',  # **字段名：** 值（**后必须跟内容）
+            r'^<strong>[^<]+[：:]</strong>\s+',  # <strong>字段名：</strong> 值
+            r'^(?:原文章标题|原文件标题|文章标题|文件标题|SEO描述|别名简短URL|WordPress标签|标签|分类|作者|日期)[：:]\s*',  # 常见元数据字段
         ]
         for pattern in patterns:
-            if re.search(pattern, line):
+            if re.search(pattern, line, re.IGNORECASE):
                 return True
         return False
     
@@ -814,17 +830,55 @@ class ModernApp:
                 try:
                     # 先处理WordPress格式内容（提取***之间的内容和元数据）
                     processed_content = self.process_wp_content(content)
+                    
+                    # 分离元数据注释和正文（Markdown转换前）
+                    metadata_comments = []
+                    article_content = processed_content
+                    
+                    # 提取元数据注释
+                    comment_pattern = r'<!--\s*([^：]+)\s*：\s*([^>]+)\s*-->'
+                    for m in re.finditer(comment_pattern, processed_content):
+                        metadata_comments.append(f"<!-- {m.group(1).strip()}：{m.group(2).strip()} -->")
+                    
+                    # 移除元数据注释，保留纯正文用于Markdown转换
+                    article_content = re.sub(r'\n*<!--\s*[^>]+-->\n*', '\n\n', processed_content).strip()
 
                     # 检查是否需要进行Markdown转换
                     if self.markdown_convert.get():
-                        if self.watcher.is_markdown_content(processed_content):
+                        if self.watcher.is_markdown_content(article_content):
                             try:
-                                converted_content = markdown.markdown(processed_content)
+                                # 只转换正文部分
+                                converted_content = markdown.markdown(article_content, extensions=['tables', 'fenced_code'])
+                                # 将元数据注释添加到HTML最前面
+                                if metadata_comments:
+                                    converted_content = '\n'.join(metadata_comments) + '\n\n' + converted_content
                                 processed_content = converted_content
                                 self.log("已将Markdown转换为HTML")
                             except Exception as e:
                                 self.log(f"Markdown转换失败: {e}")
+                                # 转换失败时保留原内容
+                                if metadata_comments:
+                                    processed_content = '\n'.join(metadata_comments) + '\n\n' + article_content
+                                else:
+                                    processed_content = article_content
+                        else:
+                            # 不是Markdown格式，保留原样
+                            processed_content = article_content
+                            if metadata_comments:
+                                processed_content = '\n'.join(metadata_comments) + '\n\n' + processed_content
+                    else:
+                        # 不转换Markdown，但保留处理后的内容
+                        processed_content = article_content
+                        if metadata_comments:
+                            processed_content = '\n'.join(metadata_comments) + '\n\n' + processed_content
 
+                    # 去除 <hr /> 标签和 Markdown 分隔线 ---
+                    processed_content = re.sub(r'\s*<hr\s*/?>\s*', '\n\n', processed_content, flags=re.IGNORECASE)
+                    # 去除独立的 --- 分隔线（但保留表格分隔符 |---|）
+                    processed_content = re.sub(r'^(?<!\|)\s*---\s*(?!\|)$', '', processed_content, flags=re.MULTILINE)
+                    # 清理多余的空行
+                    processed_content = re.sub(r'\n{3,}', '\n\n', processed_content)
+                    
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(processed_content)
 
