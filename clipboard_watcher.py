@@ -817,6 +817,61 @@ class ModernApp:
         
         return metadata
 
+    def _normalize_markdown_format(self, content):
+        """预处理Markdown格式，确保块级元素之间有空行分隔
+        
+        解决markdown库解析问题时，因缺少空行导致：
+        1. 表格无法正确识别
+        2. 表格后内容被合并到表格中
+        3. 段落被错误合并
+        """
+        if not content:
+            return content
+        
+        lines = content.split('\n')
+        result = []
+        in_table = False
+        
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            is_table_row = stripped.startswith('|') and len(stripped) > 1
+            
+            # 检测表格开始/结束
+            if is_table_row and not in_table:
+                # 表格开始：确保前面有空行
+                if result and result[-1].strip():
+                    result.append('')
+                in_table = True
+            elif not is_table_row and in_table:
+                # 表格结束
+                in_table = False
+                # 如果下一行不是空行且不是另一个表格，确保有空行
+                if stripped and i < len(lines) - 1:
+                    result.append('')
+            
+            # 处理非表格的块级元素（标题、列表等）
+            if not in_table and stripped:
+                is_heading = bool(re.match(r'^#{1,6}\s', stripped))
+                is_list_item = bool(re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', stripped))
+                
+                if (is_heading or is_list_item) and result and result[-1].strip():
+                    # 确保前面有空行（除非上一行也是同类元素）
+                    prev_stripped = result[-1].strip() if result else ''
+                    prev_is_heading = bool(re.match(r'^#{1,6}\s', prev_stripped))
+                    prev_is_list = bool(re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', prev_stripped))
+                    
+                    if not (prev_is_heading or prev_is_list):
+                        result.append('')
+            
+            result.append(line)
+        
+        normalized = '\n'.join(result)
+        
+        # 清理多余空行（超过2个连续空行变成2个）
+        normalized = re.sub(r'\n{3,}', '\n\n', normalized)
+        
+        return normalized
+
     def on_clipboard_change(self, file_path, filename, title, content, matched, matched_file=None, similarity=0):
         t = THEMES[self.current_theme]
 
@@ -842,6 +897,9 @@ class ModernApp:
                     
                     # 移除元数据注释，保留纯正文用于Markdown转换
                     article_content = re.sub(r'\n*<!--\s*[^>]+-->\n*', '\n\n', processed_content).strip()
+
+                    # 预处理Markdown格式：确保块级元素之间有空行分隔
+                    article_content = self._normalize_markdown_format(article_content)
 
                     # 检查是否需要进行Markdown转换
                     if self.markdown_convert.get():
