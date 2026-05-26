@@ -774,19 +774,35 @@ class ModernApp:
         return metadata_lines >= 2 and metadata_lines >= (non_empty_lines // 2)
     
     def _is_metadata_line(self, line):
-        """判断单行是否是元数据格式"""
+        """判断单行是否是元数据格式
+        
+        只识别已知的元数据字段名，避免将正文中的 **字段：值** 格式误判为元数据。
+        """
         # 排除表格行（以 | 开头或包含表格分隔符 |---|）
         if line.startswith('|') or '|---' in line or '|---|' in line:
             return False
         
-        patterns = [
-            r'^\*\*[^*]+[：:]\*\*\s+',  # **字段名：** 值（**后必须跟内容）
-            r'^<strong>[^<]+[：:]</strong>\s+',  # <strong>字段名：</strong> 值
-            r'^(?:原文章标题|原文件标题|文章标题|文件标题|SEO描述|别名简短URL|WordPress标签|标签|分类|作者|日期)[：:]\s*',  # 常见元数据字段
+        # 已知的元数据字段名列表（严格匹配，避免误判）
+        known_metadata_fields = [
+            '原文章标题', '原文件标题', '文章标题', '文件标题',
+            'SEO描述', 'seo描述', 'SEO描述',
+            '别名简短url', '别名简短URL', '别名',
+            'WordPress标签', 'wordpress标签', '标签', '分类',
+            '作者', '日期', '摘要', '关键词'
         ]
-        for pattern in patterns:
-            if re.search(pattern, line, re.IGNORECASE):
+        
+        # 模式1: **已知字段名：** 值 或 <strong>已知字段名：</strong> 值
+        for field in known_metadata_fields:
+            if re.search(rf'\*\*{re.escape(field)}[：:]\*\*\s+', line, re.IGNORECASE):
                 return True
+            if re.search(rf'<strong>{re.escape(field)}[：:]</strong>\s+', line, re.IGNORECASE):
+                return True
+        
+        # 模式2: 普通文本格式 - 已知字段名：值（行首）
+        for field in known_metadata_fields:
+            if re.match(rf'^[\s]*{re.escape(field)}[：:]\s*', line, re.IGNORECASE):
+                return True
+        
         return False
     
     def _extract_metadata(self, text):
