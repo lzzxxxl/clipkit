@@ -727,6 +727,9 @@ class ModernApp:
                 stripped = line.strip()
                 if not stripped:
                     in_metadata = False
+                    # 保留空行到正文，避免后续段落被 Markdown 合并
+                    if article_lines and article_lines[-1] != '':
+                        article_lines.append('')
                     continue
                     
                 # 检查是否是元数据行
@@ -865,20 +868,25 @@ class ModernApp:
                 if stripped and i < len(lines) - 1:
                     result.append('')
             
-            # 处理非表格的块级元素（标题、列表等）
+            # 处理非表格的块级元素（标题、列表、加粗字段等）
             if not in_table and stripped:
                 is_heading = bool(re.match(r'^#{1,6}\s', stripped))
                 is_list_item = bool(re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', stripped))
-                
-                if (is_heading or is_list_item) and result and result[-1].strip():
-                    # 确保前面有空行（除非上一行也是同类元素）
-                    prev_stripped = result[-1].strip() if result else ''
-                    prev_is_heading = bool(re.match(r'^#{1,6}\s', prev_stripped))
-                    prev_is_list = bool(re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', prev_stripped))
-                    
-                    if not (prev_is_heading or prev_is_list):
+                # 识别 **xxx**：或 **xxx**: 形式的字段行（AI 输出的 Markdown 中常见）
+                is_field = bool(re.match(r'^\*\*[^*]+\*\*[：:]', stripped))
+
+                # 列表项：只在前面不是列表时加空行（连续列表项不需空行）
+                if is_list_item and result and result[-1].strip():
+                    prev_stripped = result[-1].strip()
+                    if not (re.match(r'^#{1,6}\s', prev_stripped) or
+                            re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', prev_stripped)):
                         result.append('')
-            
+
+                # 标题 / 字段：前面只要不是空行就强制加空行
+                # （AI 输出常常把字段连在一起，必须拆开才能分段）
+                elif (is_heading or is_field) and result and result[-1].strip():
+                    result.append('')
+
             result.append(line)
         
         normalized = '\n'.join(result)
