@@ -843,6 +843,8 @@ class ModernApp:
         1. 表格无法正确识别
         2. 表格后内容被合并到表格中
         3. 段落被错误合并
+        4. 列表项内部换行丢失
+        5. 普通文本行被合并成一个段落
         """
         if not content:
             return content
@@ -850,43 +852,75 @@ class ModernApp:
         lines = content.split('\n')
         result = []
         in_table = False
+        in_list = False  # 追踪是否在列表内部
+        prev_was_list_item = False
         
         for i, line in enumerate(lines):
             stripped = line.strip()
             is_table_row = stripped.startswith('|') and len(stripped) > 1
+            is_list_item = bool(stripped and re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', stripped))
+            is_heading = bool(stripped and re.match(r'^#{1,6}\s', stripped))
+            # 识别 **xxx**：或 **xxx**: 形式的字段行
+            is_field = bool(stripped and re.match(r'^\*\*[^*]+\*\*[：:]', stripped))
             
             # 检测表格开始/结束
             if is_table_row and not in_table:
-                # 表格开始：确保前面有空行
                 if result and result[-1].strip():
                     result.append('')
                 in_table = True
+                in_list = False
             elif not is_table_row and in_table:
-                # 表格结束
                 in_table = False
-                # 如果下一行不是空行且不是另一个表格，确保有空行
-                if stripped and i < len(lines) - 1:
+            
+            # 检测列表开始/结束
+            if is_list_item and not in_table:
+                in_list = True
+                # 列表项开始：确保前面有空行（除非上一行也是列表项）
+                if result and result[-1].strip():
+                    prev_stripped = result[-1].strip()
+                    prev_is_list = bool(re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', prev_stripped))
+                    if not prev_is_list and not re.match(r'^#{1,6}\s', prev_stripped):
+                        result.append('')
+            elif (not is_list_item and not is_heading and not is_field 
+                  and not is_table_row and stripped and in_list):
+                # 非空的非列表行，且之前在列表中 → 这是列表项的续行
+                # 在上一行（列表项）末尾加两个空格实现 <br>
+                if result and prev_was_list_item:
+                    if result[-1] and not result[-1].endswith('  '):
+                        result[-1] = result[-1] + '  '
+                # 续行不触发列表结束，保持在列表内
+            elif not is_list_item and not is_table_row:
+                # 完全不在列表中的情况 → 列表结束
+                if in_list:
+                    in_list = False
+                    if result and result[-1].strip() and stripped:
+                        result.append('')
+            
+            prev_was_list_item = is_list_item
+            
+            # 标题 / 字段：前面只要不是空行就强制加空行
+            if (is_heading or is_field) and result and result[-1].strip() and not in_table and not in_list:
+                prev_stripped = result[-1].strip()
+                prev_is_heading = bool(re.match(r'^#{1,6}\s', prev_stripped))
+                prev_is_field = bool(re.match(r'^\*\*[^*]+\*\*[：:]', prev_stripped))
+                if not (prev_is_heading or prev_is_field):
                     result.append('')
             
-            # 处理非表格的块级元素（标题、列表、加粗字段等）
-            if not in_table and stripped:
-                is_heading = bool(re.match(r'^#{1,6}\s', stripped))
-                is_list_item = bool(re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', stripped))
-                # 识别 **xxx**：或 **xxx**: 形式的字段行（AI 输出的 Markdown 中常见）
-                is_field = bool(re.match(r'^\*\*[^*]+\*\*[：:]', stripped))
-
-                # 列表项：只在前面不是列表时加空行（连续列表项不需空行）
-                if is_list_item and result and result[-1].strip():
-                    prev_stripped = result[-1].strip()
-                    if not (re.match(r'^#{1,6}\s', prev_stripped) or
-                            re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', prev_stripped)):
-                        result.append('')
-
-                # 标题 / 字段：前面只要不是空行就强制加空行
-                # （AI 输出常常把字段连在一起，必须拆开才能分段）
-                elif (is_heading or is_field) and result and result[-1].strip():
+            # 普通文本行：确保独立成段（但不在列表/表格内部）
+            if (stripped and not is_list_item and not is_heading and not is_field 
+                and not is_table_row and not in_list and not in_table
+                and result and result[-1].strip()):
+                prev_stripped = result[-1].strip()
+                # 如果上一行是普通文本（非特殊格式），插入空行使其成为独立段落
+                prev_is_special = (
+                    re.match(r'^#{1,6}\s', prev_stripped) or
+                    re.match(r'^\s*[-*+]\s|^\s*\d+\.\s', prev_stripped) or
+                    re.match(r'^\*\*[^*]+\*\*[：:]', prev_stripped) or
+                    prev_stripped.startswith('|')
+                )
+                if not prev_is_special:
                     result.append('')
-
+            
             result.append(line)
         
         normalized = '\n'.join(result)
@@ -930,7 +964,7 @@ class ModernApp:
                         if self.watcher.is_markdown_content(article_content):
                             try:
                                 # 只转换正文部分
-                                converted_content = markdown.markdown(article_content, extensions=['tables', 'fenced_code'])
+                                converted_content = markdown.markdown(article_content, extensions=['tables', 'fenced_code', 'nl2br'])
                                 # 将元数据注释添加到HTML最前面
                                 if metadata_comments:
                                     converted_content = '\n'.join(metadata_comments) + '\n\n' + converted_content
