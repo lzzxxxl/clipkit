@@ -789,7 +789,7 @@ class ModernApp:
         known_metadata_fields = [
             '原文章标题', '原文件标题', '文章标题', '文件标题',
             'SEO描述', 'seo描述', 'SEO描述',
-            '别名简短url', '别名简短URL', '别名',
+            '别名简短url', '别名简短URL', '别名', 'URL简短别名','url简短别名',
             'WordPress标签', 'wordpress标签', '标签', '分类',
             '作者', '日期', '摘要', '关键词'
         ]
